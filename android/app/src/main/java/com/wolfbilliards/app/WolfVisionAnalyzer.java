@@ -17,19 +17,24 @@ final class WolfVisionAnalyzer {
         final int[] ballX, ballY;
         final boolean cueBallFound;
         final int cueBallX, cueBallY;
+        final boolean cueDirectionFound;
+        final float aimAngleRadians;
 
         Result(int left, int top, int right, int bottom, int[] xs, int[] ys,
-               boolean found, int cueX, int cueY) {
+               boolean found, int cueX, int cueY, boolean directionFound, float aimAngle) {
             tableLeft = left; tableTop = top; tableRight = right; tableBottom = bottom;
             ballX = xs; ballY = ys; ballCount = xs.length; tableFound = found;
             cueBallFound = cueX >= 0 && cueY >= 0;
             cueBallX = cueX; cueBallY = cueY;
+            cueDirectionFound = directionFound;
+            aimAngleRadians = aimAngle;
         }
 
         String describe() {
             if (!tableFound) return "تحليل مباشر: جاري البحث عن الطاولة";
             return "الطاولة مكتشفة · كرات مرشحة: " + ballCount
-                + (cueBallFound ? " · كرة بيضاء محتملة" : " · جاري تحديد الكرة البيضاء");
+                + (cueBallFound ? " · كرة بيضاء محتملة" : " · جاري تحديد الكرة البيضاء")
+                + (cueDirectionFound ? " · اتجاه تصويب مبدئي" : " · جاري البحث عن العصاية");
         }
     }
 
@@ -112,11 +117,23 @@ final class WolfVisionAnalyzer {
         int[] xs = new int[candidates], ys = new int[candidates];
         System.arraycopy(candidateX, 0, xs, 0, candidates);
         System.arraycopy(candidateY, 0, ys, 0, candidates);
-        return new Result(left, top, right, bottom, xs, ys, true, cueX, cueY);
+        float aimAngle = Float.NaN;
+        boolean directionFound = false;
+        if (cueX >= 0 && cueY >= 0) {
+            float stickAngle = findCueStickAngle(bitmap, cueX, cueY, radius);
+            if (!Float.isNaN(stickAngle)) {
+                // The cue extends behind the cue ball; the shot travels in the opposite direction.
+                aimAngle = (float) (stickAngle + Math.PI);
+                directionFound = true;
+            }
+        }
+        return new Result(left, top, right, bottom, xs, ys, true,
+            cueX, cueY, directionFound, aimAngle);
     }
 
     private static Result emptyResult() {
-        return new Result(0, 0, 0, 0, new int[0], new int[0], false, -1, -1);
+        return new Result(0, 0, 0, 0, new int[0], new int[0],
+            false, -1, -1, false, Float.NaN);
     }
 
     private static boolean hasWhiteCore(Bitmap bitmap, int x, int y, int radius) {
@@ -140,6 +157,72 @@ final class WolfVisionAnalyzer {
 
     private static int whiteScore(int color) {
         return Math.min(Color.red(color), Math.min(Color.green(color), Color.blue(color)));
+    }
+
+    /**
+     * Estimates the cue-stick axis by scanning rays outward from the cue ball.
+     * The stick is expected behind the cue ball, so callers reverse this angle
+     * to obtain the initial shot direction. This is a color heuristic, not ML.
+     */
+    private static float findCueStickAngle(Bitmap bitmap, int cueX, int cueY, int radius) {
+        final int angleSteps = 72; // 5-degree angular resolution
+        final int samples = 24;
+        final double start = radius * 1.8;
+        final double end = radius * 13.0;
+        float bestAngle = Float.NaN;
+        double bestScore = 0.0;
+
+        for (int a = 0; a < angleSteps; a++) {
+            double angle = Math.PI * 2.0 * a / angleSteps;
+            double dx = Math.cos(angle), dy = Math.sin(angle);
+            int hits = 0, longestRun = 0, run = 0;
+            for (int i = 0; i < samples; i++) {
+                double distance = start + (end - start) * i / (samples - 1);
+                int x = (int) Math.round(cueX + dx * distance);
+                int y = (int) Math.round(cueY + dy * distance);
+                if (x < 2 || y < 2 || x >= bitmap.getWidth() - 2 || y >= bitmap.getHeight() - 2) {
+                    run = 0;
+                    continue;
+                }
+                int px = bitmap.getPixel(x, y);
+                boolean stickPixel = isCueLikeColor(px);
+                // A narrow cue may be offset by a pixel due to antialiasing or scaling.
+                if (!stickPixel) {
+                    int ox = (int) Math.round(-dy * 1.5);
+                    int oy = (int) Math.round(dx * 1.5);
+                    stickPixel = isCueLikeColor(bitmap.getPixel(x + ox, y + oy))
+                        || isCueLikeColor(bitmap.getPixel(x - ox, y - oy));
+                }
+                if (stickPixel) {
+                    hits++;
+                    run++;
+                    if (run > longestRun) longestRun = run;
+                } else {
+                    run = 0;
+                }
+            }
+            double score = hits + longestRun * 0.65;
+            if (hits >= 10 && longestRun >= 5 && score > bestScore) {
+                bestScore = score;
+                bestAngle = (float) angle;
+            }
+        }
+        return bestAngle;
+    }
+
+    private static boolean isCueLikeColor(int color) {
+        int r = Color.red(color), g = Color.green(color), b = Color.blue(color);
+        int max = Math.max(r, Math.max(g, b));
+        int min = Math.min(r, Math.min(g, b));
+        if (max < 48 || max == min) return false;
+        float hue;
+        if (max == r) hue = 60f * (((g - b) / (float) (max - min)) % 6f);
+        else if (max == g) hue = 60f * (((b - r) / (float) (max - min)) + 2f);
+        else hue = 60f * (((r - g) / (float) (max - min)) + 4f);
+        if (hue < 0f) hue += 360f;
+        float saturation = (max - min) / (float) max;
+        // Covers common wood/gold cue shafts; deliberately conservative.
+        return hue >= 8f && hue <= 48f && saturation >= 0.22f;
     }
 
     private static int clamp(int value, int min, int max) {
