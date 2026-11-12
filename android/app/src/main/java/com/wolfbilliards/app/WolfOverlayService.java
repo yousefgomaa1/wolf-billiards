@@ -37,8 +37,6 @@ public class WolfOverlayService extends Service {
     private WindowManager.LayoutParams bubbleParams;
     private WindowManager.LayoutParams panelParams;
     private boolean panelVisible = false;
-    private ManualAimOverlayView manualView;
-    private WindowManager.LayoutParams manualParams;
     private AutoAimOverlayView autoAimView;
     private WindowManager.LayoutParams autoAimParams;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -232,16 +230,6 @@ public class WolfOverlayService extends Service {
         close.setOnClickListener(v -> hidePanel());
         container.addView(toolbar);
 
-        Button manualButton = new Button(this);
-        manualButton.setText("تشغيل التصويب اليدوي (بدون تسجيل شاشة)");
-        manualButton.setOnClickListener(v -> {
-            hidePanel();
-            showManualTrainer();
-        });
-        container.addView(manualButton, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(48)
-        ));
-
         Button captureButton = new Button(this);
         captureButton.setText("بدء قراءة الشاشة");
         captureButton.setOnClickListener(v -> {
@@ -316,33 +304,6 @@ public class WolfOverlayService extends Service {
         });
     }
 
-    private void showManualTrainer() {
-        if (manualView != null) return;
-        final int screenW = getResources().getDisplayMetrics().widthPixels;
-        final int screenH = getResources().getDisplayMetrics().heightPixels;
-        int width = (int) (screenW * 0.86f);
-        int height = (int) (screenH * 0.76f);
-        manualView = new ManualAimOverlayView(this, () -> hideManualTrainer());
-        manualParams = new WindowManager.LayoutParams(
-            width, height,
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                : WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        );
-        manualParams.gravity = Gravity.CENTER;
-        windowManager.addView(manualView, manualParams);
-    }
-
-    private void hideManualTrainer() {
-        if (manualView != null) {
-            try { windowManager.removeView(manualView); } catch (Exception ignored) {}
-            manualView = null;
-            manualParams = null;
-        }
-    }
-
     private void hidePanel() {
         if (panel != null) {
             try { windowManager.removeView(panel); } catch (Exception ignored) {}
@@ -355,7 +316,6 @@ public class WolfOverlayService extends Service {
     public void onDestroy() {
         if (activeService == this) activeService = null;
         hideAutoAimOverlay();
-        hideManualTrainer();
         hidePanel();
         if (bubble != null) {
             try { windowManager.removeView(bubble); } catch (Exception ignored) {}
