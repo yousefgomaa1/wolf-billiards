@@ -14,10 +14,11 @@ final class WolfVisionAnalyzer {
         final int tableLeft, tableTop, tableRight, tableBottom;
         final int ballCount;
         final boolean tableFound;
+        final int[] ballX, ballY;
 
-        Result(int left, int top, int right, int bottom, int count, boolean found) {
+        Result(int left, int top, int right, int bottom, int[] xs, int[] ys, boolean found) {
             tableLeft = left; tableTop = top; tableRight = right; tableBottom = bottom;
-            ballCount = count; tableFound = found;
+            ballX = xs; ballY = ys; ballCount = xs.length; tableFound = found;
         }
 
         String describe() {
@@ -29,7 +30,7 @@ final class WolfVisionAnalyzer {
     private WolfVisionAnalyzer() {}
 
     static Result analyze(Bitmap bitmap) {
-        if (bitmap == null || bitmap.isRecycled()) return new Result(0, 0, 0, 0, 0, false);
+        if (bitmap == null || bitmap.isRecycled()) return new Result(0, 0, 0, 0, new int[0], new int[0], false);
         final int width = bitmap.getWidth(), height = bitmap.getHeight();
         if (width < 100 || height < 100) return new Result(0, 0, 0, 0, 0, false);
 
@@ -62,6 +63,7 @@ final class WolfVisionAnalyzer {
         int tableWidth = right - left;
         int radius = Math.max(5, Math.min(18, tableWidth / 55));
         int step = Math.max(3, radius / 2);
+        int[] candidateX = new int[16], candidateY = new int[16];
         int candidates = 0;
         int lastX = -10000, lastY = -10000;
 
@@ -84,6 +86,8 @@ final class WolfVisionAnalyzer {
                     if (isFelt(pixel)) feltRing++;
                 }
                 if (feltRing >= 8) {
+                    candidateX[candidates] = x;
+                    candidateY[candidates] = y;
                     candidates++;
                     lastX = x; lastY = y;
                     if (candidates >= 16) break;
@@ -91,7 +95,10 @@ final class WolfVisionAnalyzer {
             }
             if (candidates >= 16) break;
         }
-        return new Result(left, top, right, bottom, candidates, true);
+        int[] xs = new int[candidates], ys = new int[candidates];
+        System.arraycopy(candidateX, 0, xs, 0, candidates);
+        System.arraycopy(candidateY, 0, ys, 0, candidates);
+        return new Result(left, top, right, bottom, xs, ys, true);
     }
 
     private static boolean isFelt(int color) {
