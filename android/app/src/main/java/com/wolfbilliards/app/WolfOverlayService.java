@@ -173,17 +173,6 @@ public class WolfOverlayService extends Service {
         close.setTextSize(20);
         close.setPadding(0, 0, 0, 0);
         toolbar.addView(close, new LinearLayout.LayoutParams(dp(44), dp(42)));
-        Button capture = new Button(this);
-        capture.setText("قراءة الشاشة");
-        capture.setTextSize(11);
-        toolbar.addView(capture, new LinearLayout.LayoutParams(dp(112), dp(42)));
-        capture.setOnClickListener(v -> {
-            Intent request = new Intent(this, MainActivity.class);
-            request.setAction(MainActivity.ACTION_REQUEST_CAPTURE);
-            request.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            startActivity(request);
-        });
-
         close.setOnClickListener(v -> hidePanel());
         container.addView(toolbar);
 
@@ -198,13 +187,6 @@ public class WolfOverlayService extends Service {
         container.addView(webView, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1
         ));
-
-        TextView note = new TextView(this);
-        note.setText("اضغط «قراءة الشاشة» ووافق على مشاركة الشاشة لبدء الالتقاط. التحليل التلقائي للكرات لم يُفعّل بعد.");
-        note.setTextColor(Color.LTGRAY);
-        note.setTextSize(10);
-        note.setPadding(dp(10), dp(6), dp(10), dp(8));
-        container.addView(note);
 
         panel = container;
         panelParams = new WindowManager.LayoutParams(
