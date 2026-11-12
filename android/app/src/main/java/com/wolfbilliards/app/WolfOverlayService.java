@@ -242,32 +242,13 @@ public class WolfOverlayService extends Service {
             LinearLayout.LayoutParams.MATCH_PARENT, dp(48)
         ));
 
-        WebView webView = new WebView(this);
-        WebSettings settings = webView.getSettings();
-        settings.setJavaScriptEnabled(true);
-        settings.setDomStorageEnabled(true);
-        settings.setAllowFileAccess(true);
-        webView.setWebChromeClient(new WebChromeClient() {
-            @Override
-            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
-                deliverImagePickerResult(null);
-                synchronized (WolfOverlayService.class) {
-                    pendingImageCallback = callback;
-                }
-                try {
-                    Intent picker = new Intent(WolfOverlayService.this, WolfImagePickerActivity.class);
-                    picker.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(picker);
-                    return true;
-                } catch (Exception error) {
-                    deliverImagePickerResult(null);
-                    return false;
-                }
-            }
-        });
-        webView.setBackgroundColor(Color.rgb(9, 11, 14));
-        webView.loadUrl("file:///android_asset/public/index.html");
-        container.addView(webView, new LinearLayout.LayoutParams(
+        TextView status = new TextView(this);
+        status.setText("التصويب التلقائي\n\nابدأ قراءة الشاشة، ثم افتح 8 Ball Pool. سيحاول WOLF اكتشاف الطاولة والكرات واتجاه العصاية ورسم التحليل تلقائيًا فوق اللعبة.\n\nملاحظة: دقة الكشف ما زالت تجريبية وتحتاج اختبارًا على شاشة لعب حقيقية.");
+        status.setTextColor(Color.WHITE);
+        status.setTextSize(14);
+        status.setGravity(Gravity.CENTER);
+        status.setPadding(dp(18), dp(24), dp(18), dp(24));
+        container.addView(status, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1
         ));
 
