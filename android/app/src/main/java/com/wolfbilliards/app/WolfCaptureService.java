@@ -165,6 +165,9 @@ public class WolfCaptureService extends Service {
                 Bitmap frame = imageToBitmap(image);
                 WolfVisionAnalyzer.Result analysis = frame == null
                     ? null : WolfVisionAnalyzer.analyze(frame);
+                if (analysis != null) {
+                    WolfOverlayService.publishVisionResult(analysis, frame.getWidth(), frame.getHeight());
+                }
                 if (frame != null) frame.recycle();
 
                 long now = System.currentTimeMillis();
