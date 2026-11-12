@@ -15,6 +15,7 @@ public class ManualAimOverlayView extends View {
     private float startX, startY, endX, endY;
     private boolean tableLocked = false;
     private int dragMode = 0;
+    private int tableCorner = 3;
     private static final int NONE = 0, START = 1, END = 2, TABLE = 3, MOVE_TABLE = 4;
     private float lastX, lastY;
     private float handleRadius;
@@ -97,7 +98,7 @@ public class ManualAimOverlayView extends View {
         float len = (float)Math.hypot(dx,dy);
         if (len < 1) return;
         dx /= len; dy /= len;
-        float x = startX, y = startY;
+        float x = endX, y = endY;
         paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(dp(2.4f));
         paint.setColor(0xFFFFF4D0); paint.setPathEffect(null);
         Path first = new Path(); first.moveTo(startX,startY); first.lineTo(endX,endY);
@@ -111,7 +112,7 @@ public class ManualAimOverlayView extends View {
             if (dy > .0001f) { float t=(table.bottom-y)/dy; if(t>dp(2)&&t<ty){ty=t;hitSide=2;} }
             if (dy < -.0001f) { float t=(table.top-y)/dy; if(t>dp(2)&&t<ty){ty=t;hitSide=2;} }
             float t=Math.min(tx,ty);
-            if (!Float.isFinite(t) || t<=0) break;
+            if (Float.isInfinite(t) || Float.isNaN(t) || t<=0) break;
             float hx=x+dx*t, hy=y+dy*t;
             paint.setColor(new int[]{0xFFFFD34E,0xFFFF914D,0xFFFF5D68,0xFFB18CFF,0xFF51D7D0}[bounce]);
             paint.setStrokeWidth(dp(2)); paint.setPathEffect(new android.graphics.DashPathEffect(new float[]{dp(8),dp(5)},0));
@@ -133,7 +134,7 @@ public class ManualAimOverlayView extends View {
             }
             if (distance(x,y,startX,startY)<handleRadius*1.8f) dragMode=START;
             else if(distance(x,y,endX,endY)<handleRadius*1.8f) dragMode=END;
-            else if(!tableLocked && nearTableCorner(x,y)) dragMode=TABLE;
+            else if(!tableLocked && nearTableCorner(x,y)) { dragMode=TABLE; tableCorner=nearestCorner(x,y); }
             else if(!tableLocked && table.contains(x,y)) dragMode=MOVE_TABLE;
             return true;
         }
@@ -141,7 +142,14 @@ public class ManualAimOverlayView extends View {
             float dx=x-lastX, dy=y-lastY;
             if(dragMode==START){startX=x;startY=y;}
             else if(dragMode==END){endX=x;endY=y;}
-            else if(dragMode==TABLE){table.right+=dx;table.bottom+=dy;}
+            else if(dragMode==TABLE){
+                if(tableCorner==0){table.left+=dx;table.top+=dy;}
+                else if(tableCorner==1){table.right+=dx;table.top+=dy;}
+                else if(tableCorner==2){table.left+=dx;table.bottom+=dy;}
+                else {table.right+=dx;table.bottom+=dy;}
+                if(table.width()<dp(140)) table.right=table.left+dp(140);
+                if(table.height()<dp(100)) table.bottom=table.top+dp(100);
+            }
             else if(dragMode==MOVE_TABLE){table.offset(dx,dy);}
             lastX=x;lastY=y;invalidate();return true;
         }
@@ -149,6 +157,12 @@ public class ManualAimOverlayView extends View {
         return true;
     }
 
+    private int nearestCorner(float x,float y) {
+        float[][] points={{table.left,table.top},{table.right,table.top},{table.left,table.bottom},{table.right,table.bottom}};
+        int best=0; float bestDistance=Float.MAX_VALUE;
+        for(int i=0;i<points.length;i++){float v=distance(x,y,points[i][0],points[i][1]);if(v<bestDistance){bestDistance=v;best=i;}}
+        return best;
+    }
     private boolean nearTableCorner(float x,float y) {
         float r=handleRadius*2;
         return distance(x,y,table.left,table.top)<r || distance(x,y,table.right,table.top)<r ||
