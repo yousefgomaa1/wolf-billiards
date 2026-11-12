@@ -18,6 +18,9 @@
   const statShots = document.getElementById('statShots');
   const statPocketed = document.getElementById('statPocketed');
   const hintText = document.getElementById('hintText');
+  const editBtn = document.getElementById('editBtn');
+  const imageBtn = document.getElementById('imageBtn');
+  const imageInput = document.getElementById('imageInput');
 
   const W = 900;
   const H = 500;
@@ -84,6 +87,8 @@
   let running = false;
   let paused = false;
   let ballInHand = false;
+  let editingBalls = false;
+  let selectedBallIndex = -1;
 
   let trails = [];
   let sparks = [];
@@ -682,6 +687,11 @@
     });
 
     drawBalls();
+    if (editingBalls && selectedBallIndex >= 0 && balls[selectedBallIndex]) {
+      const selected = balls[selectedBallIndex];
+      ctx.beginPath(); ctx.arc(selected.x, selected.y, R + 5, 0, Math.PI * 2);
+      ctx.strokeStyle = '#ffdc78'; ctx.lineWidth = 2; ctx.stroke();
+    }
     drawSparks();
 
     if (!running && !ballInHand) drawAimAssist();
@@ -704,7 +714,7 @@
   // ==========================================
 
   function shoot() {
-    if (running || paused || ballInHand) return;
+    if (running || paused || ballInHand || editingBalls) return;
     const white = balls[0];
     if (!white || white.pocketed) return;
 
@@ -758,6 +768,180 @@
   }
 
   // ==========================================
+  // IMAGE IMPORT + LIGHTWEIGHT BALL DETECTION
+  // Runs only after the user selects an image; no screen capture or background processing.
+  // ==========================================
+
+  function rgbToHsv(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    let h = 0;
+    if (d) {
+      if (max === r) h = ((g - b) / d) % 6;
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h *= 60; if (h < 0) h += 360;
+    }
+    return { h, s: max ? d / max : 0, v: max };
+  }
+
+  function detectTableRegion(data, width, height) {
+    let minX = width, minY = height, maxX = -1, maxY = -1, count = 0;
+    for (let y = 0; y < height; y += 2) {
+      for (let x = 0; x < width; x += 2) {
+        const i = (y * width + x) * 4;
+        const hsv = rgbToHsv(data[i], data[i + 1], data[i + 2]);
+        const felt = hsv.s > 0.22 && hsv.v > 0.12 &&
+          ((hsv.h >= 68 && hsv.h <= 175) || (hsv.h >= 180 && hsv.h <= 255));
+        if (!felt) continue;
+        minX = Math.min(minX, x); minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); count++;
+      }
+    }
+    if (count < width * height * 0.025 || maxX <= minX || maxY <= minY) return null;
+    const padX = Math.round((maxX - minX) * 0.015);
+    const padY = Math.round((maxY - minY) * 0.025);
+    return {
+      left: Math.max(0, minX - padX), top: Math.max(0, minY - padY),
+      right: Math.min(width - 1, maxX + padX), bottom: Math.min(height - 1, maxY + padY)
+    };
+  }
+
+  function sampleRgb(data, width, x, y) {
+    x = Math.max(0, Math.min(width - 1, Math.round(x)));
+    y = Math.max(0, Math.min(Math.floor(data.length / 4 / width) - 1, Math.round(y)));
+    const i = (y * width + x) * 4;
+    return [data[i], data[i + 1], data[i + 2]];
+  }
+
+  function detectBallCandidates(data, width, height, table) {
+    const tableWidth = table.right - table.left;
+    const radius = Math.max(5, Math.min(16, tableWidth / 82));
+    const step = Math.max(2, Math.round(radius * 0.48));
+    const candidates = [];
+    const ringCount = 16;
+
+    for (let y = table.top + radius * 1.35; y < table.bottom - radius * 1.35; y += step) {
+      for (let x = table.left + radius * 1.35; x < table.right - radius * 1.35; x += step) {
+        const center = sampleRgb(data, width, x, y);
+        const inner = [0, 0, 0], outer = [0, 0, 0];
+        let outerFelt = 0, innerFelt = 0;
+        for (let k = 0; k < ringCount; k++) {
+          const a = Math.PI * 2 * k / ringCount;
+          const p1 = sampleRgb(data, width, x + Math.cos(a) * radius * 0.48, y + Math.sin(a) * radius * 0.48);
+          const p2 = sampleRgb(data, width, x + Math.cos(a) * radius * 1.22, y + Math.sin(a) * radius * 1.22);
+          for (let c = 0; c < 3; c++) { inner[c] += p1[c]; outer[c] += p2[c]; }
+          const h1 = rgbToHsv(p1[0], p1[1], p1[2]);
+          const h2 = rgbToHsv(p2[0], p2[1], p2[2]);
+          if (h1.s > 0.22 && h1.v > 0.12 && ((h1.h >= 68 && h1.h <= 175) || (h1.h >= 180 && h1.h <= 255))) innerFelt++;
+          if (h2.s > 0.22 && h2.v > 0.12 && ((h2.h >= 68 && h2.h <= 175) || (h2.h >= 180 && h2.h <= 255))) outerFelt++;
+        }
+        if (outerFelt < ringCount * 0.68 || innerFelt > ringCount * 0.55) continue;
+        let diff = 0;
+        for (let c = 0; c < 3; c++) diff += Math.abs(inner[c] - outer[c]) / ringCount;
+        diff /= 3;
+        const hsv = rgbToHsv(center[0], center[1], center[2]);
+        if (diff < 25 || hsv.v < 0.12) continue;
+        candidates.push({ x, y, radius, score: diff + (outerFelt / ringCount) * 8, color: center, hsv });
+      }
+    }
+
+    candidates.sort((a, b) => b.score - a.score);
+    const selected = [];
+    for (const candidate of candidates) {
+      if (selected.every(p => Math.hypot(p.x - candidate.x, p.y - candidate.y) > radius * 1.55)) {
+        selected.push(candidate);
+        if (selected.length >= 16) break;
+      }
+    }
+    return selected;
+  }
+
+  function classifyDetectedBall(candidate, usedNumbers) {
+    const { h, s, v } = candidate.hsv;
+    if (v < 0.23) return BALL_TYPES.find(b => b.num === 8);
+    if (s < 0.22 && v > 0.68) return { num: 0, color: '#f4f1e8', stripe: false };
+
+    const palette = [
+      { num: 1, hue: 48 }, { num: 2, hue: 212 }, { num: 3, hue: 4 },
+      { num: 4, hue: 275 }, { num: 5, hue: 28 }, { num: 6, hue: 151 }, { num: 7, hue: 350 }
+    ];
+    const hueDistance = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
+    const nearest = palette.reduce((best, item) =>
+      hueDistance(h, item.hue) < hueDistance(h, best.hue) ? item : best, palette[0]);
+    const localType = BALL_TYPES.find(b => b.num === nearest.num);
+    const usedSolid = usedNumbers.has(nearest.num);
+    const number = usedSolid ? nearest.num + 8 : nearest.num;
+    usedNumbers.add(number);
+    return { ...BALL_TYPES.find(b => b.num === number), color: localType.color };
+  }
+
+  function importTableImage(file) {
+    if (!file || !file.type.startsWith('image/')) return;
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const scale = Math.min(1, 1200 / image.width);
+        const width = Math.max(1, Math.round(image.width * scale));
+        const height = Math.max(1, Math.round(image.height * scale));
+        const offscreen = document.createElement('canvas');
+        offscreen.width = width; offscreen.height = height;
+        const imageCtx = offscreen.getContext('2d', { willReadFrequently: true });
+        imageCtx.drawImage(image, 0, 0, width, height);
+        const pixels = imageCtx.getImageData(0, 0, width, height).data;
+        const table = detectTableRegion(pixels, width, height);
+        if (!table) {
+          hintText.textContent = 'مش قادر أحدد لون الطاولة في الصورة. جرّب Screenshot أوضح والطاولة كاملة.';
+          return;
+        }
+        const found = detectBallCandidates(pixels, width, height, table);
+        if (found.length < 3) {
+          hintText.textContent = 'الصورة اتفتحت، لكن اكتشاف الكرات مش واضح كفاية. استخدم وضع تعديل الكرات لتحريكها يدويًا.';
+          return;
+        }
+
+        const mapX = x => bounds.left + (x - table.left) / (table.right - table.left) * (bounds.right - bounds.left);
+        const mapY = y => bounds.top + (y - table.top) / (table.bottom - table.top) * (bounds.bottom - bounds.top);
+        const usedNumbers = new Set();
+        let cueBall = null;
+        const objectBalls = [];
+        found.forEach(candidate => {
+          const type = classifyDetectedBall(candidate, usedNumbers);
+          const ball = {
+            x: mapX(candidate.x), y: mapY(candidate.y), vx: 0, vy: 0,
+            color: type.color, number: type.num, stripe: !!type.stripe,
+            pocketed: false, rotation: 0
+          };
+          if (type.num === 0 && !cueBall) cueBall = ball;
+          else objectBalls.push(ball);
+        });
+
+        const previousCue = balls.find(b => b.number === 0 && !b.pocketed) || { ...cue };
+        balls = [cueBall || { ...previousCue, vx: 0, vy: 0, pocketed: false }, ...objectBalls];
+        trails = []; sparks = []; prediction = [];
+        running = false; paused = false; ballInHand = false;
+        if (animationId !== null) { cancelAnimationFrame(animationId); animationId = null; }
+        editingBalls = true;
+        editBtn.textContent = 'إنهاء التعديل';
+        hintText.textContent = 'اتحدد ' + found.length + ' كرة بشكل مبدئي. راجع أماكنها وألوانها واسحب أي كرة لتصحيحها قبل التصويب.';
+        draw();
+      } catch (error) {
+        hintText.textContent = 'حصلت مشكلة في تحليل الصورة. تقدر تستخدم تعديل الكرات يدويًا.';
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+        imageInput.value = '';
+      }
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      imageInput.value = '';
+      hintText.textContent = 'تعذر فتح الصورة. جرّب ملف JPG أو PNG.';
+    };
+    image.src = objectUrl;
+  }
+
+  // ==========================================
   // POINTER CONTROL
   // ==========================================
 
@@ -771,6 +955,19 @@
   canvas.addEventListener('pointerdown', e => {
     initAudio();
     const pt = pointer(e);
+
+    if (editingBalls && !running) {
+      selectedBallIndex = -1;
+      let nearestDistance = R * 2.2;
+      balls.forEach((ball, index) => {
+        if (ball.pocketed) return;
+        const distance = Math.hypot(pt.x - ball.x, pt.y - ball.y);
+        if (distance < nearestDistance) { nearestDistance = distance; selectedBallIndex = index; }
+      });
+      if (selectedBallIndex >= 0) canvas.setPointerCapture(e.pointerId);
+      draw();
+      return;
+    }
 
     if (ballInHand) {
       const overlap = balls.some(b => !b.pocketed && b.number !== 0 && Math.hypot(pt.x - b.x, pt.y - b.y) < DIAMETER + 2);
@@ -796,6 +993,15 @@
   });
 
   canvas.addEventListener('pointermove', e => {
+    if (editingBalls && selectedBallIndex >= 0) {
+      const pt = pointer(e);
+      const ball = balls[selectedBallIndex];
+      ball.x = Math.max(bounds.left + R, Math.min(bounds.right - R, pt.x));
+      ball.y = Math.max(bounds.top + R, Math.min(bounds.bottom - R, pt.y));
+      draw();
+      return;
+    }
+
     if (ballInHand) {
       const pt = pointer(e);
       balls[0].x = pt.x; balls[0].y = pt.y; 
@@ -810,8 +1016,8 @@
     }
   });
 
-  canvas.addEventListener('pointerup', () => { dragging = false; });
-  canvas.addEventListener('pointercancel', () => { dragging = false; });
+  canvas.addEventListener('pointerup', () => { dragging = false; selectedBallIndex = -1; });
+  canvas.addEventListener('pointercancel', () => { dragging = false; selectedBallIndex = -1; });
 
   // ==========================================
   // SPIN & POWER CONTROLS
@@ -849,6 +1055,19 @@
 
   document.getElementById('shootBtn').addEventListener('click', () => { initAudio(); shoot(); });
   document.getElementById('resetBtn').addEventListener('click', reset);
+
+  editBtn.addEventListener('click', () => {
+    if (running) return;
+    editingBalls = !editingBalls;
+    selectedBallIndex = -1;
+    editBtn.textContent = editingBalls ? 'إنهاء التعديل' : 'تعديل الكرات';
+    hintText.textContent = editingBalls
+      ? 'اسحب أي كرة لمكانها الصحيح. اضغط «إنهاء التعديل» للعودة للتصويب.'
+      : 'وضع التصويب جاهز. اسحب حول الكرة البيضاء لتحديد الاتجاه.';
+    draw();
+  });
+  imageBtn.addEventListener('click', () => imageInput.click());
+  imageInput.addEventListener('change', event => importTableImage(event.target.files && event.target.files[0]));
   document.getElementById('clearBtn').addEventListener('click', () => { trails = []; draw(); });
   
   document.getElementById('pauseBtn').addEventListener('click', () => {
