@@ -80,6 +80,21 @@ final class AutoAimOverlayView extends View {
                     endX + (float) Math.cos(a2) * head,
                     endY + (float) Math.sin(a2) * head, paint);
             }
+
+            // The first predicted contact is drawn separately from the aim direction.
+            if (r.pathFound) {
+                float px = r.pathEndX * sx, py = r.pathEndY * sy;
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(3f * density);
+                paint.setColor(r.hitBallFound ? 0xFFFFB347 : 0xFF36D7FF);
+                canvas.drawLine(x, y, px, py, paint);
+                canvas.drawCircle(px, py, 10f * density, paint);
+                if (r.hitBallFound) {
+                    float tx = r.hitBallX * sx, ty = r.hitBallY * sy;
+                    paint.setColor(0xFFFFB347);
+                    canvas.drawCircle(tx, ty, 13f * density, paint);
+                }
+            }
         }
     }
 }
