@@ -19,15 +19,23 @@ final class WolfVisionAnalyzer {
         final int cueBallX, cueBallY;
         final boolean cueDirectionFound;
         final float aimAngleRadians;
+        final boolean pathFound;
+        final float pathEndX, pathEndY;
+        final boolean hitBallFound;
+        final int hitBallX, hitBallY;
 
         Result(int left, int top, int right, int bottom, int[] xs, int[] ys,
-               boolean found, int cueX, int cueY, boolean directionFound, float aimAngle) {
+               boolean found, int cueX, int cueY, boolean directionFound, float aimAngle,
+               boolean hasPath, float endX, float endY,
+               boolean hasHit, int hitX, int hitY) {
             tableLeft = left; tableTop = top; tableRight = right; tableBottom = bottom;
             ballX = xs; ballY = ys; ballCount = xs.length; tableFound = found;
             cueBallFound = cueX >= 0 && cueY >= 0;
             cueBallX = cueX; cueBallY = cueY;
             cueDirectionFound = directionFound;
             aimAngleRadians = aimAngle;
+            pathFound = hasPath; pathEndX = endX; pathEndY = endY;
+            hitBallFound = hasHit; hitBallX = hitX; hitBallY = hitY;
         }
 
         String describe() {
@@ -127,13 +135,18 @@ final class WolfVisionAnalyzer {
                 directionFound = true;
             }
         }
+        RayResult ray = directionFound
+            ? traceFirstCollision(left, top, right, bottom, xs, ys,
+                cueX, cueY, aimAngle, radius)
+            : RayResult.none();
         return new Result(left, top, right, bottom, xs, ys, true,
-            cueX, cueY, directionFound, aimAngle);
+            cueX, cueY, directionFound, aimAngle,
+            ray.found, ray.endX, ray.endY, ray.hitBall, ray.hitX, ray.hitY);
     }
 
     private static Result emptyResult() {
         return new Result(0, 0, 0, 0, new int[0], new int[0],
-            false, -1, -1, false, Float.NaN);
+            false, -1, -1, false, Float.NaN, false, 0f, 0f, false, -1, -1);
     }
 
     private static boolean hasWhiteCore(Bitmap bitmap, int x, int y, int radius) {
@@ -164,6 +177,68 @@ final class WolfVisionAnalyzer {
      * The stick is expected behind the cue ball, so callers reverse this angle
      * to obtain the initial shot direction. This is a color heuristic, not ML.
      */
+    private static final class RayResult {
+        final boolean found, hitBall;
+        final float endX, endY;
+        final int hitX, hitY;
+        RayResult(boolean found, float endX, float endY,
+                  boolean hitBall, int hitX, int hitY) {
+            this.found = found; this.endX = endX; this.endY = endY;
+            this.hitBall = hitBall; this.hitX = hitX; this.hitY = hitY;
+        }
+        static RayResult none() {
+            return new RayResult(false, 0f, 0f, false, -1, -1);
+        }
+    }
+
+    /**
+     * Traces a straight first segment from the cue ball to the nearest object:
+     * another detected ball or the table cushion. This is geometric guidance,
+     * not a full spin/energy/friction physics simulation.
+     */
+    private static RayResult traceFirstCollision(int left, int top, int right, int bottom,
+            int[] xs, int[] ys, int cueX, int cueY, float angle, int radius) {
+        double dx = Math.cos(angle), dy = Math.sin(angle);
+        double bestDistance = Double.POSITIVE_INFINITY;
+        boolean hitBall = false;
+        int hitX = -1, hitY = -1;
+        double ballDiameter = radius * 2.0;
+
+        // Ray-circle intersections: first contact with each other ball.
+        for (int i = 0; i < xs.length; i++) {
+            if (Math.hypot(xs[i] - cueX, ys[i] - cueY) < radius * 1.5) continue;
+            double ox = cueX - xs[i], oy = cueY - ys[i];
+            double b = 2.0 * (ox * dx + oy * dy);
+            double cc = ox * ox + oy * oy - ballDiameter * ballDiameter;
+            double discriminant = b * b - 4.0 * cc;
+            if (discriminant < 0.0) continue;
+            double distance = (-b - Math.sqrt(discriminant)) / 2.0;
+            if (distance > radius && distance < bestDistance) {
+                bestDistance = distance;
+                hitBall = true;
+                hitX = xs[i]; hitY = ys[i];
+            }
+        }
+
+        // Find the first cushion boundary reached by the cue-ball center.
+        double cushionDistance = Double.POSITIVE_INFINITY;
+        if (dx > 0.0001) cushionDistance = Math.min(cushionDistance, (right - radius - cueX) / dx);
+        else if (dx < -0.0001) cushionDistance = Math.min(cushionDistance, (left + radius - cueX) / dx);
+        if (dy > 0.0001) cushionDistance = Math.min(cushionDistance, (bottom - radius - cueY) / dy);
+        else if (dy < -0.0001) cushionDistance = Math.min(cushionDistance, (top + radius - cueY) / dy);
+        if (cushionDistance > radius && cushionDistance < bestDistance) {
+            bestDistance = cushionDistance;
+            hitBall = false;
+            hitX = -1; hitY = -1;
+        }
+
+        if (!Double.isFinite(bestDistance) || bestDistance <= 0.0) return RayResult.none();
+        return new RayResult(true,
+            (float) (cueX + dx * bestDistance),
+            (float) (cueY + dy * bestDistance),
+            hitBall, hitX, hitY);
+    }
+
     private static float findCueStickAngle(Bitmap bitmap, int cueX, int cueY, int radius) {
         final int angleSteps = 72; // 5-degree angular resolution
         final int samples = 24;
