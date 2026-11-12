@@ -23,11 +23,14 @@ final class WolfVisionAnalyzer {
         final float pathEndX, pathEndY;
         final boolean hitBallFound;
         final int hitBallX, hitBallY;
+        final boolean targetPathFound;
+        final float targetPathEndX, targetPathEndY;
 
         Result(int left, int top, int right, int bottom, int[] xs, int[] ys,
                boolean found, int cueX, int cueY, boolean directionFound, float aimAngle,
                boolean hasPath, float endX, float endY,
-               boolean hasHit, int hitX, int hitY) {
+               boolean hasHit, int hitX, int hitY,
+               boolean hasTargetPath, float targetEndX, float targetEndY) {
             tableLeft = left; tableTop = top; tableRight = right; tableBottom = bottom;
             ballX = xs; ballY = ys; ballCount = xs.length; tableFound = found;
             cueBallFound = cueX >= 0 && cueY >= 0;
@@ -36,6 +39,8 @@ final class WolfVisionAnalyzer {
             aimAngleRadians = aimAngle;
             pathFound = hasPath; pathEndX = endX; pathEndY = endY;
             hitBallFound = hasHit; hitBallX = hitX; hitBallY = hitY;
+            targetPathFound = hasTargetPath;
+            targetPathEndX = targetEndX; targetPathEndY = targetEndY;
         }
 
         String describe() {
@@ -139,14 +144,24 @@ final class WolfVisionAnalyzer {
             ? traceFirstCollision(left, top, right, bottom, xs, ys,
                 cueX, cueY, aimAngle, radius)
             : RayResult.none();
+        RayResult targetRay = RayResult.none();
+        if (ray.hitBall) {
+            // Equal-mass, low-spin approximation: the object ball initially travels
+            // along the line joining the two ball centers at impact.
+            float targetAngle = (float) Math.atan2(ray.hitY - cueY, ray.hitX - cueX);
+            targetRay = traceFirstCollision(left, top, right, bottom, xs, ys,
+                ray.hitX, ray.hitY, targetAngle, radius);
+        }
         return new Result(left, top, right, bottom, xs, ys, true,
             cueX, cueY, directionFound, aimAngle,
-            ray.found, ray.endX, ray.endY, ray.hitBall, ray.hitX, ray.hitY);
+            ray.found, ray.endX, ray.endY, ray.hitBall, ray.hitX, ray.hitY,
+            targetRay.found, targetRay.endX, targetRay.endY);
     }
 
     private static Result emptyResult() {
         return new Result(0, 0, 0, 0, new int[0], new int[0],
-            false, -1, -1, false, Float.NaN, false, 0f, 0f, false, -1, -1);
+            false, -1, -1, false, Float.NaN, false, 0f, 0f, false, -1, -1,
+            false, 0f, 0f);
     }
 
     private static boolean hasWhiteCore(Bitmap bitmap, int x, int y, int radius) {
