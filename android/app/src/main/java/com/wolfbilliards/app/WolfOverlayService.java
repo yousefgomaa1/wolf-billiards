@@ -186,6 +186,18 @@ public class WolfOverlayService extends Service {
         close.setOnClickListener(v -> hidePanel());
         container.addView(toolbar);
 
+        Button captureButton = new Button(this);
+        captureButton.setText("بدء قراءة الشاشة");
+        captureButton.setOnClickListener(v -> {
+            Intent request = new Intent(WolfOverlayService.this, MainActivity.class);
+            request.setAction(MainActivity.ACTION_REQUEST_CAPTURE);
+            request.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            startActivity(request);
+        });
+        container.addView(captureButton, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(48)
+        ));
+
         WebView webView = new WebView(this);
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
