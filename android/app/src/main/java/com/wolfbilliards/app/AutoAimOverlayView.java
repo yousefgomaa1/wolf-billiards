@@ -101,6 +101,12 @@ final class AutoAimOverlayView extends View {
                         paint.setStrokeWidth(4f * density);
                         canvas.drawLine(tx, ty, objectEndX, objectEndY, paint);
                         canvas.drawCircle(objectEndX, objectEndY, 8f * density, paint);
+                        if (r.targetBounceFound) {
+                            float bounceX = r.targetBounceEndX * sx;
+                            float bounceY = r.targetBounceEndY * sy;
+                            canvas.drawLine(objectEndX, objectEndY, bounceX, bounceY, paint);
+                            canvas.drawCircle(bounceX, bounceY, 7f * density, paint);
+                        }
                     }
                 }
             }
