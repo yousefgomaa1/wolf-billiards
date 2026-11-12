@@ -93,6 +93,15 @@ final class AutoAimOverlayView extends View {
                     float tx = r.hitBallX * sx, ty = r.hitBallY * sy;
                     paint.setColor(0xFFFFB347);
                     canvas.drawCircle(tx, ty, 13f * density, paint);
+                    // Predicted initial travel of the object ball after contact.
+                    if (r.targetPathFound) {
+                        float objectEndX = r.targetPathEndX * sx;
+                        float objectEndY = r.targetPathEndY * sy;
+                        paint.setColor(0xFFFFD166);
+                        paint.setStrokeWidth(4f * density);
+                        canvas.drawLine(tx, ty, objectEndX, objectEndY, paint);
+                        canvas.drawCircle(objectEndX, objectEndY, 8f * density, paint);
+                    }
                 }
             }
         }
