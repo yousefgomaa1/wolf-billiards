@@ -22,7 +22,12 @@
         <div>الضربات: <b id="statShots">0</b></div>
         <div>الكرات: <b id="statPocketed">0</b></div>
       </div>
-      <button id="resetBtn" class="secondary">إعادة ترتيب</button>
+      <div class="toolbar-actions">
+        <button id="editBtn" class="secondary">تعديل الكرات</button>
+        <button id="imageBtn" class="secondary">استيراد صورة الطاولة</button>
+        <button id="resetBtn" class="secondary">إعادة ترتيب</button>
+        <input id="imageInput" type="file" accept="image/*" hidden />
+      </div>
     </section>
 
     <section class="table-wrap"><canvas id="table" aria-label="محاكاة طاولة بلياردو"></canvas></section>
@@ -41,7 +46,7 @@
       </div>
 
       <div class="actions"><button id="shootBtn">تنفيذ الضربة</button><button id="pauseBtn" class="secondary">إيقاف مؤقت</button><button id="clearBtn" class="secondary">مسح المسارات</button></div>
-      <p class="hint" id="hintText">اسحب مؤشر الاتجاه حول الكرة البيضاء لتحديد زاوية الضربة، ثم اضغط «تنفيذ الضربة».</p>
+      <p class="hint" id="hintText">اسحب مؤشر الاتجاه حول الكرة البيضاء لتحديد زاوية الضربة، أو استورد صورة للطاولة وصحح مواقع الكرات.</p>
     </section>
     <footer>نسخة 0.3 · HTML / CSS / JavaScript · لا تتصل بأي لعبة خارجية</footer>
   </main>
