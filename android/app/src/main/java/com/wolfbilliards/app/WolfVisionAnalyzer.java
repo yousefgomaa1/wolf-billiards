@@ -95,15 +95,24 @@ final class WolfVisionAnalyzer {
     }
 
     private static boolean isFelt(int color) {
-        float[] hsv = new float[3];
-        Color.colorToHSV(color, hsv);
-        return hsv[1] > 0.22f && hsv[2] > 0.12f &&
-            ((hsv[0] >= 68f && hsv[0] <= 175f) || (hsv[0] >= 180f && hsv[0] <= 255f));
+        int r = Color.red(color), g = Color.green(color), b = Color.blue(color);
+        int max = Math.max(r, Math.max(g, b)), min = Math.min(r, Math.min(g, b));
+        float saturation = max == 0 ? 0f : (max - min) / (float) max;
+        if (saturation <= 0.22f || max / 255f <= 0.12f) return false;
+        float hue;
+        if (max == min) hue = 0f;
+        else if (max == r) hue = 60f * (((g - b) / (float) (max - min)) % 6f);
+        else if (max == g) hue = 60f * (((b - r) / (float) (max - min)) + 2f);
+        else hue = 60f * (((r - g) / (float) (max - min)) + 4f);
+        if (hue < 0f) hue += 360f;
+        return (hue >= 68f && hue <= 175f) || (hue >= 180f && hue <= 255f);
     }
 
     private static boolean looksLikeBallCenter(int color) {
-        float[] hsv = new float[3];
-        Color.colorToHSV(color, hsv);
-        return hsv[2] > 0.48f && (hsv[1] < 0.88f || hsv[2] > 0.82f);
+        int r = Color.red(color), g = Color.green(color), b = Color.blue(color);
+        int max = Math.max(r, Math.max(g, b)), min = Math.min(r, Math.min(g, b));
+        float saturation = max == 0 ? 0f : (max - min) / (float) max;
+        float value = max / 255f;
+        return value > 0.48f && (saturation < 0.88f || value > 0.82f);
     }
 }
