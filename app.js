@@ -204,6 +204,9 @@
   // ==========================================
 
   function reset() {
+    editingBalls = false;
+    selectedBallIndex = -1;
+    editBtn.textContent = 'تعديل الكرات';
     balls = [{ ...cue, rotation: 0 }];
     
     // توليد أماكن المثلث (5 صفوف)
@@ -678,7 +681,7 @@
     ctx.clearRect(0, 0, W, H);
     drawTable();
 
-    if (!running && !ballInHand) drawPredictions();
+    if (!running && !ballInHand && !editingBalls) drawPredictions();
 
     trails.forEach(t => {
       ctx.beginPath(); ctx.moveTo(t.x1, t.y1); ctx.lineTo(t.x2, t.y2);
@@ -694,8 +697,8 @@
     }
     drawSparks();
 
-    if (!running && !ballInHand) drawAimAssist();
-    drawCueStick();
+    if (!running && !ballInHand && !editingBalls) drawAimAssist();
+    if (!editingBalls) drawCueStick();
 
     if (ballInHand) {
       const white = balls[0];
