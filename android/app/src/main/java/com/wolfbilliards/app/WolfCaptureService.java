@@ -13,6 +13,9 @@ import android.media.Image;
 import android.media.ImageReader;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
+import android.graphics.Bitmap;
+import android.graphics.Rect;
+import java.nio.ByteBuffer;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -157,17 +160,24 @@ public class WolfCaptureService extends Service {
                 image = reader.acquireLatestImage();
                 if (image == null) return;
                 frameCount++;
+                // Convert the RGBA ImageReader plane into a Bitmap while respecting
+                // rowStride/pixelStride, then analyze it on this dedicated worker thread.
+                Bitmap frame = imageToBitmap(image);
+                WolfVisionAnalyzer.Result analysis = frame == null
+                    ? null : WolfVisionAnalyzer.analyze(frame);
+                if (frame != null) frame.recycle();
+
                 long now = System.currentTimeMillis();
-                if (now - lastNotificationAt > 5000) {
+                if (now - lastNotificationAt > 2500) {
                     lastNotificationAt = now;
+                    String status = analysis == null
+                        ? "التقاط نشط · في انتظار إطار صالح"
+                        : analysis.describe();
                     notificationManager.notify(
                         NOTIFICATION_ID,
-                        buildNotification("التقاط نشط · " + metrics.widthPixels + "×" +
-                            metrics.heightPixels + " · إطارات: " + frameCount)
+                        buildNotification(status + " · إطارات: " + frameCount)
                     );
                 }
-                // Frames stay in memory and are released immediately.
-                // Table and ball recognition is a separate next implementation stage.
             } catch (Exception ignored) {
             } finally {
                 if (image != null) image.close();
@@ -184,6 +194,24 @@ public class WolfCaptureService extends Service {
             null,
             imageHandler
         );
+    }
+
+    private Bitmap imageToBitmap(Image image) {
+        if (image == null || image.getPlanes() == null || image.getPlanes().length == 0) return null;
+        Image.Plane plane = image.getPlanes()[0];
+        ByteBuffer buffer = plane.getBuffer();
+        int width = image.getWidth();
+        int height = image.getHeight();
+        int pixelStride = plane.getPixelStride();
+        int rowStride = plane.getRowStride();
+        int rowPadding = rowStride - pixelStride * width;
+        int paddedWidth = width + Math.max(0, rowPadding / Math.max(1, pixelStride));
+        Bitmap padded = Bitmap.createBitmap(paddedWidth, height, Bitmap.Config.ARGB_8888);
+        buffer.rewind();
+        padded.copyPixelsFromBuffer(buffer);
+        Bitmap cropped = Bitmap.createBitmap(padded, 0, 0, width, height);
+        if (cropped != padded) padded.recycle();
+        return cropped;
     }
 
     private void stopCapture() {
