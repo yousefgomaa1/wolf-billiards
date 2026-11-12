@@ -35,9 +35,10 @@ final class AutoAimOverlayView extends View {
         float sy = getHeight() / (float) sourceHeight;
         float l = r.tableLeft * sx, t = r.tableTop * sy;
         float right = r.tableRight * sx, bottom = r.tableBottom * sy;
+        float density = getResources().getDisplayMetrics().density;
 
         paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(3f * getResources().getDisplayMetrics().density);
+        paint.setStrokeWidth(3f * density);
         paint.setColor(0xE6FFD45C);
         canvas.drawRoundRect(new RectF(l, t, right, bottom), 12f, 12f, paint);
 
@@ -45,10 +46,21 @@ final class AutoAimOverlayView extends View {
         paint.setColor(0xE6FFFFFF);
         for (int i = 0; i < r.ballCount; i++) {
             float x = r.ballX[i] * sx, y = r.ballY[i] * sy;
-            canvas.drawCircle(x, y, 9f * getResources().getDisplayMetrics().density, paint);
+            canvas.drawCircle(x, y, 9f * density, paint);
             paint.setColor(0xFF16C784);
-            canvas.drawCircle(x, y, 5f * getResources().getDisplayMetrics().density, paint);
+            canvas.drawCircle(x, y, 5f * density, paint);
             paint.setColor(0xE6FFFFFF);
+        }
+
+        // A distinct cyan target marks a probable cue ball, not a verified identity.
+        if (r.cueBallFound) {
+            float x = r.cueBallX * sx, y = r.cueBallY * sy;
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(3f * density);
+            paint.setColor(0xFF36D7FF);
+            canvas.drawCircle(x, y, 15f * density, paint);
+            canvas.drawLine(x - 20f * density, y, x + 20f * density, y, paint);
+            canvas.drawLine(x, y - 20f * density, x, y + 20f * density, paint);
         }
     }
 }
