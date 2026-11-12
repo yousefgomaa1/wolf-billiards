@@ -4,10 +4,10 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 
 /**
- * First live-frame vision stage.
- * Finds the dominant felt region and circular high-contrast ball candidates.
- * This is deliberately conservative: it reports confidence/counts and does not
- * invent cue direction or claim a complete 8-ball object detector.
+ * Live-frame vision stage.
+ * Finds the felt region and conservative ball candidates, then marks a likely
+ * white cue ball only when its center and nearby inner samples are near-white.
+ * Cue-stick direction and collision prediction are intentionally not inferred here.
  */
 final class WolfVisionAnalyzer {
     static final class Result {
@@ -15,24 +15,31 @@ final class WolfVisionAnalyzer {
         final int ballCount;
         final boolean tableFound;
         final int[] ballX, ballY;
+        final boolean cueBallFound;
+        final int cueBallX, cueBallY;
 
-        Result(int left, int top, int right, int bottom, int[] xs, int[] ys, boolean found) {
+        Result(int left, int top, int right, int bottom, int[] xs, int[] ys,
+               boolean found, int cueX, int cueY) {
             tableLeft = left; tableTop = top; tableRight = right; tableBottom = bottom;
             ballX = xs; ballY = ys; ballCount = xs.length; tableFound = found;
+            cueBallFound = cueX >= 0 && cueY >= 0;
+            cueBallX = cueX; cueBallY = cueY;
         }
 
         String describe() {
             if (!tableFound) return "تحليل مباشر: جاري البحث عن الطاولة";
-            return "الطاولة مكتشفة · كرات مرشحة: " + ballCount;
+            return "الطاولة مكتشفة · كرات مرشحة: " + ballCount
+                + (cueBallFound ? " · كرة بيضاء محتملة" : " · جاري تحديد الكرة البيضاء");
         }
     }
 
     private WolfVisionAnalyzer() {}
 
     static Result analyze(Bitmap bitmap) {
-        if (bitmap == null || bitmap.isRecycled()) return new Result(0, 0, 0, 0, new int[0], new int[0], false);
+        if (bitmap == null || bitmap.isRecycled())
+            return emptyResult();
         final int width = bitmap.getWidth(), height = bitmap.getHeight();
-        if (width < 100 || height < 100) return new Result(0, 0, 0, 0, new int[0], new int[0], false);
+        if (width < 100 || height < 100) return emptyResult();
 
         int left = width, top = height, right = -1, bottom = -1, feltPixels = 0;
         int[] row = new int[width];
@@ -49,9 +56,8 @@ final class WolfVisionAnalyzer {
             }
         }
 
-        if (feltPixels < (width * height) / 100 || right <= left || bottom <= top) {
-            return new Result(0, 0, 0, 0, new int[0], new int[0], false);
-        }
+        if (feltPixels < (width * height) / 100 || right <= left || bottom <= top)
+            return emptyResult();
 
         int padX = Math.max(2, (right - left) / 100);
         int padY = Math.max(2, (bottom - top) / 100);
@@ -66,6 +72,7 @@ final class WolfVisionAnalyzer {
         int[] candidateX = new int[16], candidateY = new int[16];
         int candidates = 0;
         int lastX = -10000, lastY = -10000;
+        int cueX = -1, cueY = -1, bestCueScore = -1;
 
         // Detect compact bright/colored centers surrounded by felt.
         for (int y = top + radius * 2; y < bottom - radius * 2; y += step) {
@@ -78,17 +85,24 @@ final class WolfVisionAnalyzer {
                 int feltRing = 0, samples = 12;
                 for (int k = 0; k < samples; k++) {
                     double angle = Math.PI * 2.0 * k / samples;
-                    int sx = Math.max(0, Math.min(width - 1,
-                        x + (int) Math.round(Math.cos(angle) * radius * 1.35)));
-                    int sy = Math.max(0, Math.min(height - 1,
-                        y + (int) Math.round(Math.sin(angle) * radius * 1.35)));
-                    int pixel = bitmap.getPixel(sx, sy);
-                    if (isFelt(pixel)) feltRing++;
+                    int sx = clamp(x + (int) Math.round(Math.cos(angle) * radius * 1.35), 0, width - 1);
+                    int sy = clamp(y + (int) Math.round(Math.sin(angle) * radius * 1.35), 0, height - 1);
+                    if (isFelt(bitmap.getPixel(sx, sy))) feltRing++;
                 }
                 if (feltRing >= 8) {
-                    candidateX[candidates] = x;
-                    candidateY[candidates] = y;
-                    candidates++;
+                    if (candidates < candidateX.length) {
+                        candidateX[candidates] = x;
+                        candidateY[candidates] = y;
+                        candidates++;
+                    }
+                    if (hasWhiteCore(bitmap, x, y, radius)) {
+                        int score = whiteScore(center);
+                        if (score > bestCueScore) {
+                            bestCueScore = score;
+                            cueX = x;
+                            cueY = y;
+                        }
+                    }
                     lastX = x; lastY = y;
                     if (candidates >= 16) break;
                 }
@@ -98,7 +112,38 @@ final class WolfVisionAnalyzer {
         int[] xs = new int[candidates], ys = new int[candidates];
         System.arraycopy(candidateX, 0, xs, 0, candidates);
         System.arraycopy(candidateY, 0, ys, 0, candidates);
-        return new Result(left, top, right, bottom, xs, ys, true);
+        return new Result(left, top, right, bottom, xs, ys, true, cueX, cueY);
+    }
+
+    private static Result emptyResult() {
+        return new Result(0, 0, 0, 0, new int[0], new int[0], false, -1, -1);
+    }
+
+    private static boolean hasWhiteCore(Bitmap bitmap, int x, int y, int radius) {
+        int offset = Math.max(1, radius / 3);
+        int[][] points = {
+            {x, y}, {x - offset, y}, {x + offset, y},
+            {x, y - offset}, {x, y + offset}
+        };
+        int whiteSamples = 0;
+        for (int[] point : points) {
+            int color = bitmap.getPixel(
+                clamp(point[0], 0, bitmap.getWidth() - 1),
+                clamp(point[1], 0, bitmap.getHeight() - 1));
+            int min = Math.min(Color.red(color), Math.min(Color.green(color), Color.blue(color)));
+            int max = Math.max(Color.red(color), Math.max(Color.green(color), Color.blue(color)));
+            float saturation = max == 0 ? 1f : (max - min) / (float) max;
+            if (min >= 155 && saturation <= 0.30f) whiteSamples++;
+        }
+        return whiteSamples >= 4;
+    }
+
+    private static int whiteScore(int color) {
+        return Math.min(Color.red(color), Math.min(Color.green(color), Color.blue(color)));
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     private static boolean isFelt(int color) {
