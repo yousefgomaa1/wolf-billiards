@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">WOLF BILLIARDS</string>
+    <string name="title_activity_main">WOLF BILLIARDS</string>
+    <string name="package_name">com.wolfbilliards.app</string>
+    <string name="custom_url_scheme">com.wolfbilliards.app</string>
+</resources>

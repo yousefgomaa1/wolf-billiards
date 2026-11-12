@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WOLF BILLIARDS — Physics Lab</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div><div class="eyebrow">INDEPENDENT PHYSICS SIMULATOR</div><h1>WOLF <span>BILLIARDS</span></h1></div>
+      <div class="status"><i></i> محاكاة محلية</div>
+    </header>
+    
+    <section class="intro">
+      <div>
+        <h2>Physics Lab</h2>
+        <p>جرّب اتجاه الضربة وقوتها وشاهد حركة الكرات داخل محاكاة مستقلة.</p>
+      </div>
+      <div class="stats-panel">
+        <div>الضربات: <b id="statShots">0</b></div>
+        <div>الكرات: <b id="statPocketed">0</b></div>
+      </div>
+      <button id="resetBtn" class="secondary">إعادة ترتيب</button>
+    </section>
+
+    <section class="table-wrap"><canvas id="table" aria-label="محاكاة طاولة بلياردو"></canvas></section>
+    
+    <section class="controls">
+      <div class="control-head"><label for="power">قوة الضربة</label><strong id="powerValue">55%</strong></div>
+      <input id="power" type="range" min="10" max="100" value="55" />
+
+      <div class="spin-block">
+        <div class="control-head"><label>الدوران (Spin)</label><strong id="spinValue">0 / 0</strong></div>
+        <div class="spin-pad" id="spinPad" aria-label="لوحة التحكم في دوران الكرة البيضاء">
+          <div class="spin-guide-h"></div>
+          <div class="spin-guide-v"></div>
+          <div class="spin-dot" id="spinDot"></div>
+        </div>
+      </div>
+
+      <div class="actions"><button id="shootBtn">تنفيذ الضربة</button><button id="pauseBtn" class="secondary">إيقاف مؤقت</button><button id="clearBtn" class="secondary">مسح المسارات</button></div>
+      <p class="hint" id="hintText">اسحب مؤشر الاتجاه حول الكرة البيضاء لتحديد زاوية الضربة، ثم اضغط «تنفيذ الضربة».</p>
+    </section>
+    <footer>نسخة 0.3 · HTML / CSS / JavaScript · لا تتصل بأي لعبة خارجية</footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
