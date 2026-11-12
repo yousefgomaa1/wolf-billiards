@@ -276,8 +276,8 @@ public class WolfOverlayService extends Service {
         if (manualView != null) return;
         final int screenW = getResources().getDisplayMetrics().widthPixels;
         final int screenH = getResources().getDisplayMetrics().heightPixels;
-        int width = Math.max(dp(280), screenW - dp(24));
-        int height = Math.max(dp(300), screenH - dp(150));
+        int width = (int) (screenW * 0.86f);
+        int height = (int) (screenH * 0.76f);
         manualView = new ManualAimOverlayView(this, () -> hideManualTrainer());
         manualParams = new WindowManager.LayoutParams(
             width, height,
