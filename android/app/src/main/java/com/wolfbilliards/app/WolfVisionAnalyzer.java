@@ -32,7 +32,7 @@ final class WolfVisionAnalyzer {
     static Result analyze(Bitmap bitmap) {
         if (bitmap == null || bitmap.isRecycled()) return new Result(0, 0, 0, 0, new int[0], new int[0], false);
         final int width = bitmap.getWidth(), height = bitmap.getHeight();
-        if (width < 100 || height < 100) return new Result(0, 0, 0, 0, 0, false);
+        if (width < 100 || height < 100) return new Result(0, 0, 0, 0, new int[0], new int[0], false);
 
         int left = width, top = height, right = -1, bottom = -1, feltPixels = 0;
         int[] row = new int[width];
@@ -50,7 +50,7 @@ final class WolfVisionAnalyzer {
         }
 
         if (feltPixels < (width * height) / 100 || right <= left || bottom <= top) {
-            return new Result(0, 0, 0, 0, 0, false);
+            return new Result(0, 0, 0, 0, new int[0], new int[0], false);
         }
 
         int padX = Math.max(2, (right - left) / 100);
