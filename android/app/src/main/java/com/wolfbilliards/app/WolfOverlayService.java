@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
+import android.net.Uri;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
@@ -18,6 +19,7 @@ import android.view.WindowManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.webkit.ValueCallback;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -33,6 +35,14 @@ public class WolfOverlayService extends Service {
     private WindowManager.LayoutParams bubbleParams;
     private WindowManager.LayoutParams panelParams;
     private boolean panelVisible = false;
+    private static ValueCallback<Uri[]> pendingImageCallback;
+
+    static synchronized void deliverImagePickerResult(Uri[] result) {
+        if (pendingImageCallback != null) {
+            pendingImageCallback.onReceiveValue(result);
+            pendingImageCallback = null;
+        }
+    }
 
     @Override
     public void onCreate() {
@@ -181,7 +191,24 @@ public class WolfOverlayService extends Service {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setAllowFileAccess(true);
-        webView.setWebChromeClient(new WebChromeClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                deliverImagePickerResult(null);
+                synchronized (WolfOverlayService.class) {
+                    pendingImageCallback = callback;
+                }
+                try {
+                    Intent picker = new Intent(WolfOverlayService.this, WolfImagePickerActivity.class);
+                    picker.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(picker);
+                    return true;
+                } catch (Exception error) {
+                    deliverImagePickerResult(null);
+                    return false;
+                }
+            }
+        });
         webView.setBackgroundColor(Color.rgb(9, 11, 14));
         webView.loadUrl("file:///android_asset/public/index.html");
         container.addView(webView, new LinearLayout.LayoutParams(
