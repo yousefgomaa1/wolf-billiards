@@ -106,12 +106,12 @@ public class ManualAimOverlayView extends View {
 
         for (int bounce=0; bounce<5; bounce++) {
             float tx = Float.POSITIVE_INFINITY, ty = Float.POSITIVE_INFINITY;
-            int hitSide = -1;
-            if (dx > .0001f) { float t=(table.right-x)/dx; if(t>dp(2)&&t<tx){tx=t;hitSide=1;} }
-            if (dx < -.0001f) { float t=(table.left-x)/dx; if(t>dp(2)&&t<tx){tx=t;hitSide=1;} }
-            if (dy > .0001f) { float t=(table.bottom-y)/dy; if(t>dp(2)&&t<ty){ty=t;hitSide=2;} }
-            if (dy < -.0001f) { float t=(table.top-y)/dy; if(t>dp(2)&&t<ty){ty=t;hitSide=2;} }
+            if (dx > .0001f) { float v=(table.right-x)/dx; if(v>dp(2)) tx=v; }
+            if (dx < -.0001f) { float v=(table.left-x)/dx; if(v>dp(2)) tx=v; }
+            if (dy > .0001f) { float v=(table.bottom-y)/dy; if(v>dp(2)) ty=v; }
+            if (dy < -.0001f) { float v=(table.top-y)/dy; if(v>dp(2)) ty=v; }
             float t=Math.min(tx,ty);
+            int hitSide = tx < ty ? 1 : 2;
             if (Float.isInfinite(t) || Float.isNaN(t) || t<=0) break;
             float hx=x+dx*t, hy=y+dy*t;
             paint.setColor(new int[]{0xFFFFD34E,0xFFFF914D,0xFFFF5D68,0xFFB18CFF,0xFF51D7D0}[bounce]);
