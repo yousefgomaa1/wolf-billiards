@@ -61,6 +61,25 @@ final class AutoAimOverlayView extends View {
             canvas.drawCircle(x, y, 15f * density, paint);
             canvas.drawLine(x - 20f * density, y, x + 20f * density, y, paint);
             canvas.drawLine(x, y - 20f * density, x, y + 20f * density, paint);
+
+            // Show the estimated shot direction only when the cue-stick scan passed its threshold.
+            if (r.cueDirectionFound) {
+                float length = Math.max(90f * density, (right - l) * 0.22f);
+                float endX = x + (float) Math.cos(r.aimAngleRadians) * length;
+                float endY = y + (float) Math.sin(r.aimAngleRadians) * length;
+                paint.setStrokeWidth(4f * density);
+                paint.setColor(0xFF36D7FF);
+                canvas.drawLine(x, y, endX, endY, paint);
+                float head = 13f * density;
+                float a1 = r.aimAngleRadians + 2.55f;
+                float a2 = r.aimAngleRadians - 2.55f;
+                canvas.drawLine(endX, endY,
+                    endX + (float) Math.cos(a1) * head,
+                    endY + (float) Math.sin(a1) * head, paint);
+                canvas.drawLine(endX, endY,
+                    endX + (float) Math.cos(a2) * head,
+                    endY + (float) Math.sin(a2) * head, paint);
+            }
         }
     }
 }
