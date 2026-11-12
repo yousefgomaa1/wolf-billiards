@@ -25,12 +25,15 @@ final class WolfVisionAnalyzer {
         final int hitBallX, hitBallY;
         final boolean targetPathFound;
         final float targetPathEndX, targetPathEndY;
+        final boolean targetBounceFound;
+        final float targetBounceEndX, targetBounceEndY;
 
         Result(int left, int top, int right, int bottom, int[] xs, int[] ys,
                boolean found, int cueX, int cueY, boolean directionFound, float aimAngle,
                boolean hasPath, float endX, float endY,
                boolean hasHit, int hitX, int hitY,
-               boolean hasTargetPath, float targetEndX, float targetEndY) {
+               boolean hasTargetPath, float targetEndX, float targetEndY,
+               boolean hasBounce, float bounceEndX, float bounceEndY) {
             tableLeft = left; tableTop = top; tableRight = right; tableBottom = bottom;
             ballX = xs; ballY = ys; ballCount = xs.length; tableFound = found;
             cueBallFound = cueX >= 0 && cueY >= 0;
@@ -41,6 +44,8 @@ final class WolfVisionAnalyzer {
             hitBallFound = hasHit; hitBallX = hitX; hitBallY = hitY;
             targetPathFound = hasTargetPath;
             targetPathEndX = targetEndX; targetPathEndY = targetEndY;
+            targetBounceFound = hasBounce;
+            targetBounceEndX = bounceEndX; targetBounceEndY = bounceEndY;
         }
 
         String describe() {
@@ -145,23 +150,44 @@ final class WolfVisionAnalyzer {
                 cueX, cueY, aimAngle, radius)
             : RayResult.none();
         RayResult targetRay = RayResult.none();
+        RayResult targetBounce = RayResult.none();
         if (ray.hitBall) {
             // Equal-mass, low-spin approximation: the object ball initially travels
             // along the line joining the two ball centers at impact.
             float targetAngle = (float) Math.atan2(ray.hitY - cueY, ray.hitX - cueX);
             targetRay = traceFirstCollision(left, top, right, bottom, xs, ys,
                 ray.hitX, ray.hitY, targetAngle, radius);
+            // If the object ball reaches a cushion first, reflect the ray once and
+            // predict its next segment. Spin and cushion energy loss are not modeled.
+            if (targetRay.found && !targetRay.hitBall) {
+                double reflectedX = Math.cos(targetAngle);
+                double reflectedY = Math.sin(targetAngle);
+                double cushionLeft = left + radius, cushionRight = right - radius;
+                double cushionTop = top + radius, cushionBottom = bottom - radius;
+                double edgeTolerance = Math.max(3.0, radius * 0.8);
+                if (Math.abs(targetRay.endX - cushionLeft) <= edgeTolerance
+                        || Math.abs(targetRay.endX - cushionRight) <= edgeTolerance)
+                    reflectedX = -reflectedX;
+                if (Math.abs(targetRay.endY - cushionTop) <= edgeTolerance
+                        || Math.abs(targetRay.endY - cushionBottom) <= edgeTolerance)
+                    reflectedY = -reflectedY;
+                float reflectedAngle = (float) Math.atan2(reflectedY, reflectedX);
+                targetBounce = traceFirstCollision(left, top, right, bottom, xs, ys,
+                    Math.round(targetRay.endX), Math.round(targetRay.endY),
+                    reflectedAngle, radius);
+            }
         }
         return new Result(left, top, right, bottom, xs, ys, true,
             cueX, cueY, directionFound, aimAngle,
             ray.found, ray.endX, ray.endY, ray.hitBall, ray.hitX, ray.hitY,
-            targetRay.found, targetRay.endX, targetRay.endY);
+            targetRay.found, targetRay.endX, targetRay.endY,
+            targetBounce.found, targetBounce.endX, targetBounce.endY);
     }
 
     private static Result emptyResult() {
         return new Result(0, 0, 0, 0, new int[0], new int[0],
             false, -1, -1, false, Float.NaN, false, 0f, 0f, false, -1, -1,
-            false, 0f, 0f);
+            false, 0f, 0f, false, 0f, 0f);
     }
 
     private static boolean hasWhiteCore(Bitmap bitmap, int x, int y, int radius) {
