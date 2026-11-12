@@ -12,6 +12,8 @@ import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -37,7 +39,48 @@ public class WolfOverlayService extends Service {
     private boolean panelVisible = false;
     private ManualAimOverlayView manualView;
     private WindowManager.LayoutParams manualParams;
+    private AutoAimOverlayView autoAimView;
+    private WindowManager.LayoutParams autoAimParams;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private static volatile WolfOverlayService activeService;
     private static ValueCallback<Uri[]> pendingImageCallback;
+
+    static void publishVisionResult(WolfVisionAnalyzer.Result result, int width, int height) {
+        WolfOverlayService service = activeService;
+        if (service == null) return;
+        service.mainHandler.post(() -> service.showOrUpdateAutoAim(result, width, height));
+    }
+
+    private void showOrUpdateAutoAim(WolfVisionAnalyzer.Result result, int width, int height) {
+        if (windowManager == null || !android.provider.Settings.canDrawOverlays(this)) return;
+        if (autoAimView == null) {
+            autoAimView = new AutoAimOverlayView(this);
+            autoAimParams = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                    ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    : WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                    | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                    | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT
+            );
+            autoAimParams.gravity = Gravity.TOP | Gravity.START;
+            try { windowManager.addView(autoAimView, autoAimParams); }
+            catch (Exception error) { autoAimView = null; autoAimParams = null; return; }
+        }
+        autoAimView.setAnalysis(result, width, height);
+    }
+
+    private void hideAutoAimOverlay() {
+        if (autoAimView != null) {
+            try { windowManager.removeView(autoAimView); } catch (Exception ignored) {}
+            autoAimView = null;
+            autoAimParams = null;
+        }
+    }
 
     static synchronized void deliverImagePickerResult(Uri[] result) {
         if (pendingImageCallback != null) {
@@ -49,6 +92,7 @@ public class WolfOverlayService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        activeService = this;
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         createNotificationChannel();
         startAsForeground();
@@ -309,6 +353,8 @@ public class WolfOverlayService extends Service {
 
     @Override
     public void onDestroy() {
+        if (activeService == this) activeService = null;
+        hideAutoAimOverlay();
         hideManualTrainer();
         hidePanel();
         if (bubble != null) {
