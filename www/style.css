@@ -10,3 +10,9 @@
 .spin-dot{position:absolute;width:16px;height:16px;border-radius:50%;background:var(--gold);top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;box-shadow:0 0 12px #d6b36a99,0 0 0 2px #0a0f14 inset}
 
 @media(max-width:600px){.app{padding:16px 12px}.intro{align-items:flex-start;flex-direction:column}h1{font-size:23px}.table-wrap{padding:6px}.actions button{flex:1}}
+
+.toolbar-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.toolbar-actions button{font-size:12px;padding:10px 13px}
+#imageInput{display:none}
+canvas.editing{cursor:grab}
+@media(max-width:600px){.toolbar-actions{width:100%}.toolbar-actions button{flex:1}}
