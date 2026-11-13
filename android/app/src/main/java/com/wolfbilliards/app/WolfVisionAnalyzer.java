@@ -8,8 +8,52 @@ import android.graphics.Color;
  * Finds the felt region and conservative ball candidates, then marks a likely
  * white cue ball only when its center and nearby inner samples are near-white.
  * Cue-stick direction and collision prediction are intentionally not inferred here.
+ *
+ * Phase 4 addition: every pixel-based field below is kept intact (legacy path /
+ * fallback). When a table rect, a cue ball and candidate balls are found, the
+ * same detections are additionally exported in the unified normalized table
+ * space of wolf-engine.js (x∈[0,2], y∈[0,1], play area only) via Result.normalized
+ * so WolfOverlayService can run the aiming engine without touching the legacy path.
  */
 final class WolfVisionAnalyzer {
+
+    // ==================================================================
+    // المرحلة الرابعة: نسخة موحدة من المشهد لمحرك التصويب (wolf-engine.js)
+    // الفضاء الموحد: مساحة اللعب فقط، x من 0 إلى 2 وy من 0 إلى 1،
+    // (0,0) = الزاوية العلوية اليسرى لمساحة اللعب — نفس عقد ترويسة المحرك.
+    // ==================================================================
+    static final class Normalized {
+        static final Normalized NONE = new Normalized(false, 0f, 0f,
+            new float[0], new float[0], 0f, false, 0f, 0f);
+
+        final boolean ready;
+        /** الكرة البيضاء في الفضاء الموحد. */
+        final float cueBallX, cueBallY;
+        /** باقي الكرات المرشحة (بدون الكرة البيضاء) — الإحداثيات موحدة. */
+        final float[] ballX, ballY;
+        final int ballCount;
+        /** نصف قطر الكرة المكتشف (2 * بكسل / عرض الطاولة) — للرسم. */
+        final float ballRadius;
+        /** اتجاه العصا المكتشف محوّلًا إلى متجه وحدة في الفضاء الموحد. */
+        final boolean aimReady;
+        final float aimDirX, aimDirY;
+
+        Normalized(boolean ready, float cueBallX, float cueBallY,
+                   float[] ballX, float[] ballY, float ballRadius,
+                   boolean aimReady, float aimDirX, float aimDirY) {
+            this.ready = ready;
+            this.cueBallX = cueBallX;
+            this.cueBallY = cueBallY;
+            this.ballX = ballX;
+            this.ballY = ballY;
+            this.ballCount = ballX.length;
+            this.ballRadius = ballRadius;
+            this.aimReady = aimReady;
+            this.aimDirX = aimDirX;
+            this.aimDirY = aimDirY;
+        }
+    }
+
     static final class Result {
         final int tableLeft, tableTop, tableRight, tableBottom;
         final int ballCount;
@@ -27,6 +71,9 @@ final class WolfVisionAnalyzer {
         final float targetPathEndX, targetPathEndY;
         final boolean targetBounceFound;
         final float targetBounceEndX, targetBounceEndY;
+        // المرحلة الرابعة: نسخة موحدة من نفس المشهد (null-equivalent = غير متاح
+        // → يستمر الرسم التقليدي القديم بالكامل كـ fallback دون أي تغيير).
+        final Normalized normalized;
 
         Result(int left, int top, int right, int bottom, int[] xs, int[] ys,
                boolean found, int cueX, int cueY, boolean directionFound, float aimAngle,
@@ -34,6 +81,19 @@ final class WolfVisionAnalyzer {
                boolean hasHit, int hitX, int hitY,
                boolean hasTargetPath, float targetEndX, float targetEndY,
                boolean hasBounce, float bounceEndX, float bounceEndY) {
+            this(left, top, right, bottom, xs, ys, found, cueX, cueY, directionFound,
+                aimAngle, hasPath, endX, endY, hasHit, hitX, hitY, hasTargetPath,
+                targetEndX, targetEndY, hasBounce, bounceEndX, bounceEndY,
+                Normalized.NONE);
+        }
+
+        Result(int left, int top, int right, int bottom, int[] xs, int[] ys,
+               boolean found, int cueX, int cueY, boolean directionFound, float aimAngle,
+               boolean hasPath, float endX, float endY,
+               boolean hasHit, int hitX, int hitY,
+               boolean hasTargetPath, float targetEndX, float targetEndY,
+               boolean hasBounce, float bounceEndX, float bounceEndY,
+               Normalized normalizedData) {
             tableLeft = left; tableTop = top; tableRight = right; tableBottom = bottom;
             ballX = xs; ballY = ys; ballCount = xs.length; tableFound = found;
             cueBallFound = cueX >= 0 && cueY >= 0;
@@ -46,6 +106,12 @@ final class WolfVisionAnalyzer {
             targetPathEndX = targetEndX; targetPathEndY = targetEndY;
             targetBounceFound = hasBounce;
             targetBounceEndX = bounceEndX; targetBounceEndY = bounceEndY;
+            normalized = normalizedData == null ? Normalized.NONE : normalizedData;
+        }
+
+        /** صحيح حين تتوفر نسخة موحدة كاملة (طاولة + بيضاء) لمحرك التصويب. */
+        boolean hasNormalized() {
+            return normalized != null && normalized.ready;
         }
 
         String describe() {
@@ -177,11 +243,72 @@ final class WolfVisionAnalyzer {
                     reflectedAngle, radius);
             }
         }
+        // المرحلة الرابعة: تحويل نفس الكشف إلى الفضاء الموحد لمحرك التصويب.
+        // أي فشل هنا يترك normalized = NONE فيستمر المسار القديم كاملًا (fallback).
+        Normalized normalized = buildNormalized(left, top, right, bottom,
+            xs, ys, cueX, cueY, radius, directionFound, aimAngle);
+
         return new Result(left, top, right, bottom, xs, ys, true,
             cueX, cueY, directionFound, aimAngle,
             ray.found, ray.endX, ray.endY, ray.hitBall, ray.hitX, ray.hitY,
             targetRay.found, targetRay.endX, targetRay.endY,
-            targetBounce.found, targetBounce.endX, targetBounce.endY);
+            targetBounce.found, targetBounce.endX, targetBounce.endY,
+            normalized);
+    }
+
+    /**
+     * Phase 4: converts the pixel-space detections of this frame into the unified
+     * normalized table space documented at the top of wolf-engine.js:
+     *   xN = (px - left) * 2 / width, yN = (py - top) / height,
+     *   ballRadiusN = 2 * radiusPx / width,
+     *   direction: (dxPx * 2 / width, dyPx / height) then normalized.
+     * The cue ball is excluded from the object-ball arrays (the engine expects it
+     * separately). Returns Normalized.NONE whenever the frame is not convertible,
+     * leaving the legacy pixel path fully operational.
+     */
+    private static Normalized buildNormalized(int left, int top, int right, int bottom,
+            int[] xs, int[] ys, int cueX, int cueY, int radius,
+            boolean directionFound, float aimAngle) {
+        int width = right - left, height = bottom - top;
+        if (width <= 0 || height <= 0 || cueX < 0 || cueY < 0) return Normalized.NONE;
+
+        float cueBallX = (cueX - left) * 2f / width;
+        float cueBallY = (cueY - top) * 1f / height;
+
+        // كائنات الرؤية بدون الكرة البيضاء (المحرك يستقبلها منفصلة)
+        float[] ballX = new float[xs.length];
+        float[] ballY = new float[ys.length];
+        int count = 0;
+        for (int i = 0; i < xs.length; i++) {
+            // استبعاد مرشح الكرة البيضاء نفسه (أقرب مرشح لموقعها المكتشف)
+            if (Math.hypot(xs[i] - cueX, ys[i] - cueY) < radius * 1.6f) continue;
+            ballX[count] = (xs[i] - left) * 2f / width;
+            ballY[count] = (ys[i] - top) * 1f / height;
+            count++;
+        }
+
+        float ballRadius = 2f * radius / width;
+
+        boolean aimReady = false;
+        float aimDirX = 0f, aimDirY = 0f;
+        if (directionFound && !Float.isNaN(aimAngle)) {
+            // اتجاه بالبكسل (cos, sin) → فضاء موحد ثم تطبيع — نفس عقد المحرك
+            float rawX = (float) Math.cos(aimAngle) * 2f / width;
+            float rawY = (float) Math.sin(aimAngle) * 1f / height;
+            float length = (float) Math.hypot(rawX, rawY);
+            if (length > 1e-6f) {
+                aimDirX = rawX / length;
+                aimDirY = rawY / length;
+                aimReady = true;
+            }
+        }
+
+        if (count != ballX.length) {
+            ballX = java.util.Arrays.copyOf(ballX, count);
+            ballY = java.util.Arrays.copyOf(ballY, count);
+        }
+        return new Normalized(true, cueBallX, cueBallY, ballX, ballY,
+            ballRadius, aimReady, aimDirX, aimDirY);
     }
 
     private static Result emptyResult() {

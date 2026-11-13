@@ -14,6 +14,7 @@ import android.os.Build;
 import android.os.IBinder;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -43,6 +44,43 @@ public class WolfOverlayService extends Service {
     private static volatile WolfOverlayService activeService;
     private static ValueCallback<Uri[]> pendingImageCallback;
 
+    // ==================================================================
+    // المرحلة الرابعة: ربط محرك التصويب (wolf-engine.js) بالـ Overlay
+    // عبر WebView مخفي داخل الخدمة + throttle ذكي:
+    //   1) كشف تغير المشهد (توقيع الإحداثيات الموحدة) — مشهد ثابت = لا حل جديد،
+    //   2) دمج الطلبات + حد أدنى بين الحلول داخل WolfEngineHost
+    //      (الـ bench: أسوأ حالة 58ms → حد 350ms ≈ 2.8 حل/ث كحد أقصى)،
+    //   3) تراجع تدريجي (backoff) بعد الإخفاقات المتتالية مع عودة تلقائية.
+    // ==================================================================
+
+    /** أقصى إزاحة (وحدة موحدة) تعتبر "مشهدًا ثابتًا" — ≈ 1.2% من نصف عرض الطاولة. */
+    private static final float SCENE_MOVE_EPS = 0.012f;
+    /** أقل تغير في زاوية العصا (درجات) يستحق إعادة الحساب. */
+    private static final float SCENE_AIM_EPS_DEG = 3f;
+    /** تغير أبعاد مستطيل الطاولة (نسبة) يستحق إعادة الحساب. */
+    private static final float SCENE_RECT_EPS = 0.02f;
+    /** عدد الإخفاقات المتتالية قبل بدء التراجع التدريجي. */
+    private static final int ENGINE_FAILURES_BEFORE_BACKOFF = 3;
+
+    // حالة محرك التصويب
+    private WolfEngineHost engineHost;
+    private float[] lastSceneSignature;
+    private int engineFailureCount;
+    private long enginePausedUntilMs;
+
+    private final WolfEngineHost.Listener engineListener = new WolfEngineHost.Listener() {
+        @Override public void onSolved(WolfEngineHost.Solution solution) {
+            engineFailureCount = 0;
+            enginePausedUntilMs = 0;
+            // عرض مسارات المحرك فوق اللعبة (الرسم التقليدي يظل يعمل بالتوازي كـ fallback)
+            if (autoAimView != null && solution != null) autoAimView.setEngineResult(solution);
+        }
+
+        @Override public void onEngineError(String reason) {
+            noteEngineFailure(reason);
+        }
+    };
+
     static void publishVisionResult(WolfVisionAnalyzer.Result result, int width, int height) {
         WolfOverlayService service = activeService;
         if (service == null) return;
@@ -70,6 +108,150 @@ public class WolfOverlayService extends Service {
             catch (Exception error) { autoAimView = null; autoAimParams = null; return; }
         }
         autoAimView.setAnalysis(result, width, height);
+
+        // المرحلة الرابعة: تغذية المحرك بنفس الإطار مع throttle ذكي
+        maybeRequestEngineSolve(result, width, height);
+    }
+
+    // ==================================================================
+    // المرحلة الرابعة: خط أنابيب المحرك + throttle ذكي
+    // ==================================================================
+
+    /**
+     * يقرر هل يستحق هذا الإطار حلًا جديدًا من المحرك:
+     * فقدان الطاولة/البيضاء → مسح المسارات والعودة للرسم التقليدي،
+     * مشهد ثابت (توقيع متطابق ضمن السماحيات) → لا إعادة حساب،
+     * مشهد متغير → طلب حل عبر WolfEngineHost (يدمج الطلبات وينظّم الإيقاع).
+     */
+    private void maybeRequestEngineSolve(WolfVisionAnalyzer.Result vision, int width, int height) {
+        if (autoAimView == null) return;
+        if (vision == null || !vision.tableFound || !vision.hasNormalized()) {
+            // لا طاولة/بيضاء → مسارات المحرك القديمة لم تعد صالحة
+            autoAimView.setEngineResult(null);
+            lastSceneSignature = null;
+            return;
+        }
+
+        long now = SystemClock.elapsedRealtime();
+        if (now < enginePausedUntilMs) return; // فترة تراجع بعد إخفاقات متتالية
+
+        if (engineHost == null) engineHost = WolfEngineHost.create(this);
+        if (engineHost == null) {
+            // تعذر إنشاء الـ WebView المخفي — محاولة جديدة بعد قليل
+            enginePausedUntilMs = now + 3000;
+            return;
+        }
+
+        float[] signature = sceneSignature(vision);
+        if (sceneUnchanged(signature)) return; // مشهد ثابت → لا حل جديد
+        startEngineSolve(vision, width, height, signature);
+    }
+
+    /** يبدأ حلًا جديدًا عبر المضيف ويحدّث التوقيع المرجعي للمشهد. */
+    private void startEngineSolve(WolfVisionAnalyzer.Result vision, int width, int height,
+                                  float[] signature) {
+        String tableStateJson = WolfEngineHost.buildTableStateJson(vision);
+        if (tableStateJson == null) {
+            noteEngineFailure("state-json-null");
+            return;
+        }
+        lastSceneSignature = signature;
+        WolfVisionAnalyzer.Normalized n = vision.normalized;
+        engineHost.requestSolve(tableStateJson, width, height,
+            vision.tableLeft, vision.tableTop, vision.tableRight, vision.tableBottom,
+            n.ballRadius, engineListener);
+    }
+
+    /**
+     * توقيع المشهد: [عرض الطاولة، ارتفاعها، بيضاء (x,y)، زاوية العصا أو NaN،
+     * ثم الكرات مرتبة بالإحداثيات] — الترتيب يمنع تذبذب ترتيب الفحص بين
+     * الإطارات من التسبب في حلول لا لزوم لها.
+     */
+    private static float[] sceneSignature(WolfVisionAnalyzer.Result vision) {
+        WolfVisionAnalyzer.Normalized n = vision.normalized;
+        int count = n.ballCount;
+        float[] bx = new float[count];
+        float[] by = new float[count];
+        System.arraycopy(n.ballX, 0, bx, 0, count);
+        System.arraycopy(n.ballY, 0, by, 0, count);
+        sortByPosition(bx, by);
+
+        float[] signature = new float[5 + count * 2];
+        signature[0] = vision.tableRight - vision.tableLeft;
+        signature[1] = vision.tableBottom - vision.tableTop;
+        signature[2] = n.cueBallX;
+        signature[3] = n.cueBallY;
+        signature[4] = n.aimReady
+            ? (float) Math.atan2(n.aimDirY, n.aimDirX) : Float.NaN;
+        for (int i = 0; i < count; i++) {
+            signature[5 + i * 2] = bx[i];
+            signature[6 + i * 2] = by[i];
+        }
+        return signature;
+    }
+
+    /** مقارنة التوقيع الحالي بآخر توقيع حُلّ من أجله — ضمن السماحيات. */
+    private boolean sceneUnchanged(float[] signature) {
+        float[] last = lastSceneSignature;
+        if (last == null || last.length != signature.length) return false;
+
+        // استقرار مستطيل الطاولة (تغير التكبير/البانوراما يستحق إعادة الحساب)
+        if (Math.abs(last[0] - signature[0]) > last[0] * SCENE_RECT_EPS) return false;
+        if (Math.abs(last[1] - signature[1]) > last[1] * SCENE_RECT_EPS) return false;
+
+        // حركة الكرة البيضاء
+        if (Math.hypot(last[2] - signature[2], last[3] - signature[3]) > SCENE_MOVE_EPS)
+            return false;
+
+        // اتجاه العصا (أهم إشارة أثناء التصويب — يجب أن يستجيب التحديث لها)
+        boolean hadAim = !Float.isNaN(last[4]);
+        boolean hasAim = !Float.isNaN(signature[4]);
+        if (hadAim != hasAim) return false;
+        if (hasAim
+                && Math.abs(angleDifference(last[4], signature[4]))
+                    > Math.toRadians(SCENE_AIM_EPS_DEG))
+            return false;
+
+        // حركة أي كرة هدف
+        for (int i = 5; i < signature.length; i += 2) {
+            if (Math.hypot(last[i] - signature[i], last[i + 1] - signature[i + 1])
+                    > SCENE_MOVE_EPS) return false;
+        }
+        return true;
+    }
+
+    /** فرز الإدراج للكرات بالإحداثيات (x ثم y) — عدد الكرات صغير (≤16). */
+    private static void sortByPosition(float[] bx, float[] by) {
+        for (int i = 1; i < bx.length; i++) {
+            float x = bx[i], y = by[i];
+            int j = i - 1;
+            while (j >= 0 && (bx[j] > x || (bx[j] == x && by[j] > y))) {
+                bx[j + 1] = bx[j];
+                by[j + 1] = by[j];
+                j--;
+            }
+            bx[j + 1] = x;
+            by[j + 1] = y;
+        }
+    }
+
+    /** فرق زاويتين مطبّع إلى [-π, +π]. */
+    private static float angleDifference(float a, float b) {
+        float diff = a - b;
+        while (diff > Math.PI) diff -= (float) (2 * Math.PI);
+        while (diff < -Math.PI) diff += (float) (2 * Math.PI);
+        return diff;
+    }
+
+    /** تسجيل إخفاق محرك + تراجع تدريجي (2ث ← 4ث ← 8ث ← 15ث كحد أقصى). */
+    private void noteEngineFailure(String reason) {
+        engineFailureCount++;
+        if (engineFailureCount >= ENGINE_FAILURES_BEFORE_BACKOFF) {
+            int step = Math.min(3, engineFailureCount - ENGINE_FAILURES_BEFORE_BACKOFF);
+            long backoffMs = (long) Math.min(15000, 2000L * (1L << step));
+            enginePausedUntilMs = SystemClock.elapsedRealtime() + backoffMs;
+        }
+        // لا مسح للحل الأخير الناجح — يظل معروضًا، والرسم التقليدي يعمل بالتوازي
     }
 
     private void hideAutoAimOverlay() {
@@ -298,6 +480,12 @@ public class WolfOverlayService extends Service {
         if (activeService == this) activeService = null;
         hideAutoAimOverlay();
         hidePanel();
+        // المرحلة الرابعة: تحرير الـ WebView المخفي مع الخدمة
+        if (engineHost != null) {
+            engineHost.destroy();
+            engineHost = null;
+        }
+        lastSceneSignature = null;
         if (bubble != null) {
             try { windowManager.removeView(bubble); } catch (Exception ignored) {}
             bubble = null;
